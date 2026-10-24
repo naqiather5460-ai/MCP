@@ -1,91 +1,185 @@
 # MCP Proof of Concept: Invoice Tools with LangChain
 
-A small, runnable demonstration of the **Model Context Protocol (MCP)**. An AI agent connects to an MCP server over stdio, discovers its tools at runtime, wraps them as LangChain tools, and calls them to answer invoice questions.
+A minimal, runnable demo of the **Model Context Protocol (MCP)**. An agent starts an MCP server over stdio, discovers its tools at runtime, wraps them as LangChain tools, and calls them to answer invoice questions.
 
-This is the practical proof of concept for **Part B – MCP Exploration**.
+Practical proof of concept for **Part B: MCP Exploration**.
 
-## What it demonstrates
-
-- A real MCP server built with the official Python SDK (`FastMCP`)
-- A real MCP client session: `initialize` handshake, `tools/list` discovery, `tools/call` execution (JSON-RPC 2.0 over stdio)
-- MCP tools converted to LangChain `Tool` objects with `langchain-mcp-adapters`
-- A tool that reads from a simulated ERP and a tool that performs a calculation
-
-## Architecture
-
-```
-AI Agent -> MCP Client -> MCP Server -> Tool -> External System (simulated ERP) -> Result -> AI Agent
-```
-
-![Architecture](diagram_architecture.png)
-![Workflow](diagram_workflow.png)
-
-## Project structure
-
-| File | Purpose |
+| | |
 |---|---|
-| `invoice_mcp_server.py` | MCP server exposing two tools over stdio |
-| `agent_client.py` | Agent/host side: connects, discovers tools, wraps them with LangChain, decides which to call, invokes them |
-| `make_diagrams.py` | Generates the two diagrams with matplotlib |
-| `requirements.txt` | Python dependencies |
-| `run_output.txt` | Captured output of a successful run |
+| **Language** | Python 3.10+ |
+| **Transport** | stdio (JSON-RPC 2.0) |
+| **API key needed** | No |
+| **Runs offline** | Yes |
 
-## Tools exposed by the server
+---
+
+## 1. Architecture
+
+```mermaid
+flowchart LR
+    U([User request]) --> A[AI Agent<br/>agent_client.py]
+    A --> C[MCP Client<br/>ClientSession]
+    C <-->|stdio<br/>JSON-RPC 2.0| S[MCP Server<br/>invoice_mcp_server.py]
+    S --> T1[get_invoice_status]
+    S --> T2[calculate_late_fee]
+    T1 --> E[(Simulated ERP<br/>Python dict)]
+    T2 --> M[Late-fee formula]
+    E --> R([Result])
+    M --> R
+    R --> A
+```
+
+The client launches the server as a **subprocess**. You never start the server yourself.
+
+---
+
+## 2. Message flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as Agent
+    participant C as MCP Client
+    participant S as MCP Server
+
+    U->>A: "INV-1003 is $15,600 and 47 days overdue. Late fee?"
+    A->>C: open stdio session
+    C->>S: initialize
+    S-->>C: server info (invoice-tools)
+    C->>S: tools/list
+    S-->>C: get_invoice_status, calculate_late_fee
+    Note over C: Tools wrapped as LangChain tools
+    A->>A: choose_tool_calls() selects tools
+    A->>C: get_invoice_status(INV-1003)
+    C->>S: tools/call
+    S-->>C: vendor, amount, status, PO
+    A->>C: calculate_late_fee(15600, 47)
+    C->>S: tools/call
+    S-->>C: late_fee = 468.0, periods = 2
+    C-->>A: results
+    A-->>U: answer
+```
+
+---
+
+## 3. Tools
 
 | Tool | Input | Output |
 |---|---|---|
-| `get_invoice_status` | `invoice_id: str` | Invoice record (vendor, amount, status, PO number) or `found: false` |
-| `calculate_late_fee` | `amount: float`, `days_overdue: int` | `late_fee` and `periods_overdue` |
+| `get_invoice_status` | `invoice_id: str` | `{found, invoice_id, vendor, amount, status, po_number}` or `{found: false, invoice_id}` |
+| `calculate_late_fee` | `amount: float`, `days_overdue: int` | `{late_fee, periods_overdue}` |
 
-**Late-fee rule:** 1.5% of the invoice amount for each started 30-day period overdue. Example: 47 days = 2 periods, so $15,600.00 x 1.5% x 2 = **$468.00**.
+### Late-fee rule
 
-**Simulated ERP data:** `INV-1001` (MATCHED), `INV-1002` (MISMATCH), `INV-1003` (APPROVED).
+```mermaid
+flowchart LR
+    D{days_overdue<br/>&le; 0?} -->|yes| Z[fee = 0<br/>periods = 0]
+    D -->|no| P["periods = ceil(days / 30)"]
+    P --> F["fee = amount x 1.5% x periods"]
+```
 
-## Requirements
+Example: 47 days gives 2 started periods, so $15,600.00 x 1.5% x 2 = **$468.00**.
 
-- Python 3.10 or newer
-- No API key needed
+### Simulated ERP data
 
-## Setup and run
+| Invoice | Vendor | Amount | Status | PO |
+|---|---|---|---|---|
+| `INV-1001` | Acme Supplies | 4,200.00 | MATCHED | PO-77 |
+| `INV-1002` | Beacon Freight | 980.50 | MISMATCH | PO-81 |
+| `INV-1003` | Coastal Materials | 15,600.00 | APPROVED | PO-92 |
+
+---
+
+## 4. Project structure
+
+```
+.
+├── invoice_mcp_server.py   MCP server (FastMCP), exposes 2 tools
+├── agent_client.py         Agent + MCP client + LangChain wrapping
+├── make_diagrams.py        Generates PNG diagrams (matplotlib)
+├── requirements.txt        mcp, langchain-mcp-adapters, matplotlib
+├── run_output.txt          Captured output of a successful run
+├── diagram_architecture.png
+└── diagram_workflow.png
+```
+
+---
+
+## 5. Run it
+
+**Windows (PowerShell)**
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python agent_client.py
+```
+
+**macOS / Linux**
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
-
-python agent_client.py           # starts the server automatically and runs two sample requests
-python make_diagrams.py          # optional: regenerate the diagrams
+python agent_client.py
 ```
 
-You do not need to start the server yourself. The client launches it as a subprocess.
+Optional: `python make_diagrams.py` regenerates the PNG diagrams.
 
-## Expected output (abridged)
+### Expected output (abridged)
 
 ```
 [MCP] Connected to server: invoice-tools v<sdk version>
 [MCP] Discovered 2 tool(s) via tools/list:
-       - get_invoice_status: ...
-       - calculate_late_fee: ...
+       - get_invoice_status: Look up the current workflow status of an invoice by its ID.
+       - calculate_late_fee: Calculate a late-payment fee for an overdue invoice.
 [LangChain] Wrapped 2 MCP tool(s) as LangChain Tool objects
 [AGENT] Decided to call 2 tool(s): ['get_invoice_status', 'calculate_late_fee']
 [MCP] --> tools/call  name=calculate_late_fee  arguments={"amount": 15600.0, "days_overdue": 47}
 [MCP] <-- result: {"late_fee": 468.0, "periods_overdue": 2}
 ```
 
-See `run_output.txt` for the full run.
+Full run: see `run_output.txt`.
 
-## Important limitation: the agent is not an LLM
+---
 
-The step "decide which tool to call" is done by `choose_tool_calls()` in `agent_client.py`, a rule-based function using regular expressions. It is a **stand-in for an LLM**, chosen so the demo runs offline and deterministically and so the MCP mechanics are easy to observe. Everything else (the subprocess, the JSON-RPC session, handshake, discovery and tool calls) is genuine MCP.
+## 6. What is real and what is simulated
 
-To make it a full agent, pass the discovered LangChain tools (`lc_tools`) to an LLM-driven agent, for example a LangGraph ReAct agent, instead of calling `choose_tool_calls()`. The server needs no changes. Check the current LangChain/LangGraph docs for exact imports, as they change between versions.
+| Component | Status |
+|---|---|
+| MCP server (FastMCP), stdio transport | Real |
+| `initialize`, `tools/list`, `tools/call` over JSON-RPC 2.0 | Real |
+| MCP tools wrapped as LangChain tools | Real |
+| ERP data | **Simulated** (in-memory dict) |
+| Tool selection ("agent brain") | **Simulated** (regex rules, not an LLM) |
 
-## Possible extensions
+### Limitation: the agent is not an LLM
 
-- Add an MCP **resource** (for example `erp://invoices/{id}`) and an MCP **prompt** to cover all three primitives
-- Replace the simulated ERP dictionary with a real database
-- Serve over Streamable HTTP with authorisation instead of stdio
-- Add input validation and automated tests
+`choose_tool_calls()` in `agent_client.py` uses regular expressions to pick tools. It stands in for an LLM so the demo runs offline and deterministically.
+
+```mermaid
+flowchart LR
+    subgraph Now[Current demo]
+        R1[User request] --> R2[choose_tool_calls<br/>regex rules] --> R3[MCP tools]
+    end
+    subgraph Next[Full agent]
+        L1[User request] --> L2[LLM agent<br/>e.g. LangGraph ReAct] --> L3[MCP tools]
+    end
+```
+
+To upgrade, pass `lc_tools` to an LLM-driven agent instead of calling `choose_tool_calls()`. The server needs no changes. Check the current LangChain/LangGraph docs for exact imports, as they change between versions.
+
+---
+
+## 7. Possible extensions
+
+- [ ] Add an MCP **resource** (e.g. `erp://invoices/{id}`) and an MCP **prompt** to cover all three primitives
+- [ ] Replace the in-memory dict with a real database
+- [ ] Serve over Streamable HTTP with authorisation instead of stdio
+- [ ] Add input validation and automated tests
+
+---
 
 ## References
 
