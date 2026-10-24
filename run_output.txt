@@ -1,0 +1,55 @@
+==============================================================================
+AI AGENT received user request:
+  "What is the status of invoice INV-1002?"
+==============================================================================
+
+[MCP] Connected to server: invoice-tools v1.30.0
+Processing request of type ListToolsRequest
+[MCP] Discovered 2 tool(s) via tools/list:
+       - get_invoice_status: Look up the current workflow status of an invoice by its ID.
+       - calculate_late_fee: Calculate a late-payment fee for an overdue invoice.
+Processing request of type ListToolsRequest
+[LangChain] Wrapped 2 MCP tool(s) as LangChain Tool objects: ['get_invoice_status', 'calculate_late_fee']
+
+[AGENT] Decided to call 1 tool(s): ['get_invoice_status']
+
+[MCP] --> tools/call  name=get_invoice_status  arguments={"invoice_id": "INV-1002"}
+Processing request of type CallToolRequest
+[MCP] <-- result: [{'type': 'text', 'text': '{\n  "found": true,\n  "invoice_id": "INV-1002",\n  "vendor": "Beacon Freight",\n  "amount": 980.5,\n  "status": "MISMATCH",\n  "po_number": "PO-81"\n}', 'id': 'lc_d0e1092e-416a-41c8-8271-52fb92579aa8'}]
+[AGENT] Incorporating tool result into its next decision / final answer.
+
+==============================================================================
+Flow complete: AI Agent -> MCP Client -> MCP Server -> Tool -> External System (simulated ERP) -> Result -> AI Agent
+==============================================================================
+
+
+==============================================================================
+AI AGENT received user request:
+  "Invoice INV-1003 is $15,600.00 and is 47 days overdue -- what is the late fee?"
+==============================================================================
+
+[MCP] Connected to server: invoice-tools v1.30.0
+Processing request of type ListToolsRequest
+[MCP] Discovered 2 tool(s) via tools/list:
+       - get_invoice_status: Look up the current workflow status of an invoice by its ID.
+       - calculate_late_fee: Calculate a late-payment fee for an overdue invoice.
+Processing request of type ListToolsRequest
+[LangChain] Wrapped 2 MCP tool(s) as LangChain Tool objects: ['get_invoice_status', 'calculate_late_fee']
+
+[AGENT] Decided to call 2 tool(s): ['get_invoice_status', 'calculate_late_fee']
+
+[MCP] --> tools/call  name=get_invoice_status  arguments={"invoice_id": "INV-1003"}
+Processing request of type CallToolRequest
+[MCP] <-- result: [{'type': 'text', 'text': '{\n  "found": true,\n  "invoice_id": "INV-1003",\n  "vendor": "Coastal Materials",\n  "amount": 15600.0,\n  "status": "APPROVED",\n  "po_number": "PO-92"\n}', 'id': 'lc_54854874-9037-43c2-8c72-9859d63f31c2'}]
+[AGENT] Incorporating tool result into its next decision / final answer.
+
+[MCP] --> tools/call  name=calculate_late_fee  arguments={"amount": 15600.0, "days_overdue": 47}
+Processing request of type CallToolRequest
+[MCP] <-- result: [{'type': 'text', 'text': '{\n  "late_fee": 468.0,\n  "periods_overdue": 2\n}', 'id': 'lc_91e77b66-a041-4a04-9439-07b6bf10c276'}]
+[AGENT] Incorporating tool result into its next decision / final answer.
+
+==============================================================================
+Flow complete: AI Agent -> MCP Client -> MCP Server -> Tool -> External System (simulated ERP) -> Result -> AI Agent
+==============================================================================
+
+

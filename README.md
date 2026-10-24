@@ -1,0 +1,94 @@
+# MCP Proof of Concept: Invoice Tools with LangChain
+
+A small, runnable demonstration of the **Model Context Protocol (MCP)**. An AI agent connects to an MCP server over stdio, discovers its tools at runtime, wraps them as LangChain tools, and calls them to answer invoice questions.
+
+This is the practical proof of concept for **Part B – MCP Exploration**.
+
+## What it demonstrates
+
+- A real MCP server built with the official Python SDK (`FastMCP`)
+- A real MCP client session: `initialize` handshake, `tools/list` discovery, `tools/call` execution (JSON-RPC 2.0 over stdio)
+- MCP tools converted to LangChain `Tool` objects with `langchain-mcp-adapters`
+- A tool that reads from a simulated ERP and a tool that performs a calculation
+
+## Architecture
+
+```
+AI Agent -> MCP Client -> MCP Server -> Tool -> External System (simulated ERP) -> Result -> AI Agent
+```
+
+![Architecture](diagram_architecture.png)
+![Workflow](diagram_workflow.png)
+
+## Project structure
+
+| File | Purpose |
+|---|---|
+| `invoice_mcp_server.py` | MCP server exposing two tools over stdio |
+| `agent_client.py` | Agent/host side: connects, discovers tools, wraps them with LangChain, decides which to call, invokes them |
+| `make_diagrams.py` | Generates the two diagrams with matplotlib |
+| `requirements.txt` | Python dependencies |
+| `run_output.txt` | Captured output of a successful run |
+
+## Tools exposed by the server
+
+| Tool | Input | Output |
+|---|---|---|
+| `get_invoice_status` | `invoice_id: str` | Invoice record (vendor, amount, status, PO number) or `found: false` |
+| `calculate_late_fee` | `amount: float`, `days_overdue: int` | `late_fee` and `periods_overdue` |
+
+**Late-fee rule:** 1.5% of the invoice amount for each started 30-day period overdue. Example: 47 days = 2 periods, so $15,600.00 x 1.5% x 2 = **$468.00**.
+
+**Simulated ERP data:** `INV-1001` (MATCHED), `INV-1002` (MISMATCH), `INV-1003` (APPROVED).
+
+## Requirements
+
+- Python 3.10 or newer
+- No API key needed
+
+## Setup and run
+
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+python agent_client.py           # starts the server automatically and runs two sample requests
+python make_diagrams.py          # optional: regenerate the diagrams
+```
+
+You do not need to start the server yourself. The client launches it as a subprocess.
+
+## Expected output (abridged)
+
+```
+[MCP] Connected to server: invoice-tools v<sdk version>
+[MCP] Discovered 2 tool(s) via tools/list:
+       - get_invoice_status: ...
+       - calculate_late_fee: ...
+[LangChain] Wrapped 2 MCP tool(s) as LangChain Tool objects
+[AGENT] Decided to call 2 tool(s): ['get_invoice_status', 'calculate_late_fee']
+[MCP] --> tools/call  name=calculate_late_fee  arguments={"amount": 15600.0, "days_overdue": 47}
+[MCP] <-- result: {"late_fee": 468.0, "periods_overdue": 2}
+```
+
+See `run_output.txt` for the full run.
+
+## Important limitation: the agent is not an LLM
+
+The step "decide which tool to call" is done by `choose_tool_calls()` in `agent_client.py`, a rule-based function using regular expressions. It is a **stand-in for an LLM**, chosen so the demo runs offline and deterministically and so the MCP mechanics are easy to observe. Everything else (the subprocess, the JSON-RPC session, handshake, discovery and tool calls) is genuine MCP.
+
+To make it a full agent, pass the discovered LangChain tools (`lc_tools`) to an LLM-driven agent, for example a LangGraph ReAct agent, instead of calling `choose_tool_calls()`. The server needs no changes. Check the current LangChain/LangGraph docs for exact imports, as they change between versions.
+
+## Possible extensions
+
+- Add an MCP **resource** (for example `erp://invoices/{id}`) and an MCP **prompt** to cover all three primitives
+- Replace the simulated ERP dictionary with a real database
+- Serve over Streamable HTTP with authorisation instead of stdio
+- Add input validation and automated tests
+
+## References
+
+- Model Context Protocol: https://modelcontextprotocol.io
+- MCP Python SDK: https://github.com/modelcontextprotocol/python-sdk
+- LangChain MCP adapters: https://github.com/langchain-ai/langchain-mcp-adapters
